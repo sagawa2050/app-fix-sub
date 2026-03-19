@@ -15,10 +15,12 @@ def align_and_fix_subtitles(script_file, srt_file):
     if not script_file or not srt_file:
         return None
     try:
+        # Đọc Kịch bản
         with open(script_file.name, 'r', encoding='utf-8', errors='ignore') as f:
             script_raw = f.read()
         script_clean = re.sub(r'\s+', '', script_raw)
 
+        # Đọc Sub Lỗi
         with open(srt_file.name, 'r', encoding='utf-8', errors='ignore') as f:
             srt_raw = f.read()
         
@@ -44,6 +46,7 @@ def align_and_fix_subtitles(script_file, srt_file):
                 'stt': stt, 'time': time_frame, 'start': start_idx, 'end': end_idx, 'raw_text': text
             })
 
+        # Thuật toán lập bản đồ ký tự
         sm = difflib.SequenceMatcher(None, srt_clean, script_clean)
         map_srt2script = {}
         for tag, i1, i2, j1, j2 in sm.get_opcodes():
@@ -74,13 +77,27 @@ def align_and_fix_subtitles(script_file, srt_file):
             last_script_end = e_idx
             final_srt.append(f"{b['stt']}\n{b['time']}\n{correct_text}")
 
-        output_path = "SUB_CHOT_HA_THANH_CONG.srt"
+        # ----------------------------------------------------
+        # TÍNH NĂNG MỚI: TỰ ĐỘNG ĐẶT TÊN THEO FILE GỐC
+        # ----------------------------------------------------
+        # Trích xuất tên gốc của file srt (VD: tap01.srt)
+        original_filename = os.path.basename(srt_file.name)
+        
+        # MẸO NHỎ: Thêm chữ "_FIXED" vào đuôi để lúc tải về máy không bị đè mất file gốc
+        # Nếu bạn không thích chữ _FIXED, chỉ cần đổi thành: output_path = original_filename
+        name_only, ext = os.path.splitext(original_filename)
+        output_path = f"{name_only}_FIXED{ext}"
+        
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write("\n\n".join(final_srt))
+            
         return output_path
+        
     except Exception as e:
+        print(f"Lỗi: {e}")
         return None
 
+# --- GIAO DIỆN WEB ---
 with gr.Blocks(theme=gr.themes.Base()) as web_app:
     gr.Markdown("<h1 style='text-align: center;'>🎯 App Fix Subtitle - Hệ thống Bản quyền</h1>")
     with gr.Row():
@@ -94,6 +111,5 @@ with gr.Blocks(theme=gr.themes.Base()) as web_app:
     submit_btn.click(fn=align_and_fix_subtitles, inputs=[script_input, srt_input], outputs=output_file)
 
 if __name__ == "__main__":
-    # Lệnh bắt buộc để chạy được trên Render
     port = int(os.environ.get("PORT", 7860))
     web_app.launch(server_name="0.0.0.0", server_port=port, auth=DANH_SACH_VIP, auth_message="ĐĂNG NHẬP ĐỂ SỬ DỤNG!")
