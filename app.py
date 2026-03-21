@@ -183,7 +183,7 @@ def align_and_fix_subtitles(script_file, srt_file):
         raise gr.Error(f"LỖI HỆ THỐNG: {str(e)}\n\nChi tiết:\n{traceback.format_exc()}")
 
 # --- GIAO DIỆN WEB ---
-with gr.Blocks(theme=gr.themes.Base()) as web_app:
+with gr.Blocks() as web_app:
     gr.Markdown("<h1 style='text-align: center;'>🎯 App Fix Subtitle - So Khớp Tuyệt Đối (V26)</h1>")
     
     with gr.Row():
@@ -197,13 +197,12 @@ with gr.Blocks(theme=gr.themes.Base()) as web_app:
         with gr.Column(scale=1):
             output_file = gr.File(label="📥 TẢI VỀ: File Sub Hoàn Chỉnh")
             # Ô Textbox mới để xem trước nội dung, có nút Copy nhanh
-            preview_text = gr.Textbox(
-                label="👀 XEM TRƯỚC: Nội dung SRT", 
-                lines=18, 
-                interactive=False, 
-                show_copy_button=True,
-                placeholder="Kết quả của file Sub sẽ hiển thị ở đây để bạn kiểm tra..."
-            )
+preview_text = gr.Textbox(
+            label="👀 XEM TRƯỚC: Nội dung SRT", 
+            lines=18, 
+            interactive=False, 
+            placeholder="Kết quả của file Sub sẽ hiển thị ở đây để bạn kiểm tra..."
+        )
 
     # Kết nối Nút bấm với 2 Đầu ra (File + Textbox)
     submit_btn.click(
@@ -214,4 +213,4 @@ with gr.Blocks(theme=gr.themes.Base()) as web_app:
 
 if __name__ == "__main__":
     gr.close_all()
-    web_app.launch(share=True, debug=True)
+    web_app.launch(theme=gr.themes.Base())
