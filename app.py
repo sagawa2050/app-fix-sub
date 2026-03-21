@@ -196,15 +196,14 @@ with gr.Blocks() as web_app:
         # Cột bên phải: Khu vực Kết quả (Tải về + Xem trước)
         with gr.Column(scale=1):
             output_file = gr.File(label="📥 TẢI VỀ: File Sub Hoàn Chỉnh")
-            # Ô Textbox mới để xem trước nội dung, có nút Copy nhanh
-preview_text = gr.Textbox(
-            label="👀 XEM TRƯỚC: Nội dung SRT", 
-            lines=18, 
-            interactive=False, 
-            placeholder="Kết quả của file Sub sẽ hiển thị ở đây để bạn kiểm tra..."
-        )
+            preview_text = gr.Textbox(
+                label="👀 XEM TRƯỚC: Nội dung SRT", 
+                lines=18, 
+                interactive=False, 
+                placeholder="Kết quả của file Sub sẽ hiển thị ở đây để bạn kiểm tra..."
+            )
 
-    # Kết nối Nút bấm với 2 Đầu ra (File + Textbox)
+    # Kết nối Nút bấm với 2 Đầu ra
     submit_btn.click(
         fn=align_and_fix_subtitles, 
         inputs=[script_input, srt_input], 
