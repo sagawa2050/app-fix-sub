@@ -14,17 +14,13 @@ def align_and_fix_subtitles(script_file, srt_file):
         with open(script_path, 'r', encoding='utf-8', errors='ignore') as f:
             script_raw = f.read()
         
-        # Xóa khoảng trắng thừa nhưng GIỮ NGUYÊN chữ và dấu
         script_clean = re.sub(r'\s+', '', script_raw)
-
         if len(script_clean) == 0:
             raise ValueError("Kịch bản TXT trống.")
 
-        # Tập hợp Dấu câu
         PUNC_END = set("。、！？.,」』”’")
         PUNC_START = set("「『“‘")
 
-        # Tách riêng chữ thuần (không lấy dấu) để so khớp chính xác
         pure_chars = []
         for i, char in enumerate(script_clean):
             if char not in PUNC_END and char not in PUNC_START:
@@ -56,31 +52,83 @@ def align_and_fix_subtitles(script_file, srt_file):
             })
             
             srt_pure += clean_pure_text
-            # Đánh dấu từng ký tự thuộc về Block thời gian nào
             srt_pure_to_block.extend([i] * len(clean_pure_text))
 
         # ====================================================
-        # LÕI THUẬT TOÁN V25/V26: SO KHỚP CHÍNH TẢ TUYỆT ĐỐI
+        # LÕI THUẬT TOÁN V27: SO KHỚP CHIA CHẶN (ANCHOR-GUIDED)
         # ====================================================
-        
-        sm = difflib.SequenceMatcher(None, srt_pure, txt_pure, autojunk=False)
-        txt_pure_to_block = [-1] * len(txt_pure)
-        
-        # Ánh xạ chữ đúng vào vị trí của chữ sai
-        for tag, i1, i2, j1, j2 in sm.get_opcodes():
-            if tag == 'equal':
-                for k in range(j2 - j1):
-                    txt_pure_to_block[j1 + k] = srt_pure_to_block[i1 + k]
-            elif tag == 'replace':
-                for k in range(j2 - j1):
-                    srt_idx = i1 + int(k * (i2 - i1) / (j2 - j1))
-                    srt_idx = min(srt_idx, i2 - 1)
-                    txt_pure_to_block[j1 + k] = srt_pure_to_block[srt_idx]
-            elif tag == 'insert':
-                block_idx = srt_pure_to_block[i1 - 1] if i1 > 0 else srt_pure_to_block[0]
-                for k in range(j2 - j1):
-                    txt_pure_to_block[j1 + k] = block_idx
+        anchor_len = 12 # Độ dài cụm từ độc nhất để làm mốc neo
+        srt_ngrams = {}
+        for i in range(len(srt_pure) - anchor_len + 1):
+            gram = srt_pure[i:i+anchor_len]
+            srt_ngrams[gram] = -1 if gram in srt_ngrams else i
+            
+        txt_ngrams = {}
+        for i in range(len(txt_pure) - anchor_len + 1):
+            gram = txt_pure[i:i+anchor_len]
+            txt_ngrams[gram] = -1 if gram in txt_ngrams else i
 
+        common_anchors = []
+        for gram, srt_idx in srt_ngrams.items():
+            if srt_idx != -1:
+                txt_idx = txt_ngrams.get(gram, -1)
+                if txt_idx != -1:
+                    # Lọc nhiễu: Mốc neo không được trôi quá 25% dòng thời gian
+                    drift = abs(srt_idx / max(1, len(srt_pure)) - txt_idx / max(1, len(txt_pure)))
+                    if drift < 0.25:
+                        common_anchors.append((srt_idx, txt_idx, anchor_len))
+                        
+        common_anchors.sort() # Sắp xếp mốc neo theo thời gian thực
+        
+        # Lọc mốc neo hợp lệ (chống vắt chéo)
+        valid_anchors = []
+        last_txt = -1
+        last_srt = -1
+        for anchor in common_anchors:
+            srt_idx, txt_idx, a_len = anchor
+            if txt_idx > last_txt and srt_idx >= last_srt:
+                valid_anchors.append(anchor)
+                last_txt = txt_idx + a_len
+                last_srt = srt_idx + a_len
+
+        txt_pure_to_block = [-1] * len(txt_pure)
+        anchors = [(0, 0, 0)] + valid_anchors + [(len(srt_pure), len(txt_pure), 0)]
+        
+        # Xử lý nội dung ở khoảng giữa các mốc neo
+        for k in range(len(anchors) - 1):
+            srt_start = anchors[k][0] + anchors[k][2]
+            srt_end = anchors[k+1][0]
+            txt_start = anchors[k][1] + anchors[k][2]
+            txt_end = anchors[k+1][1]
+            
+            srt_seg = srt_pure[srt_start:srt_end]
+            txt_seg = txt_pure[txt_start:txt_end]
+            
+            if srt_seg or txt_seg:
+                sm = difflib.SequenceMatcher(None, srt_seg, txt_seg, autojunk=False)
+                for tag, i1, i2, j1, j2 in sm.get_opcodes():
+                    if tag == 'equal':
+                        for m in range(j2 - j1):
+                            txt_pure_to_block[txt_start + j1 + m] = srt_pure_to_block[srt_start + i1 + m]
+                    elif tag == 'replace':
+                        for m in range(j2 - j1):
+                            srt_m = srt_start + i1 + int(m * (i2 - i1) / max(1, j2 - j1))
+                            srt_m = min(srt_m, srt_start + i2 - 1)
+                            if srt_m < len(srt_pure_to_block):
+                                txt_pure_to_block[txt_start + j1 + m] = srt_pure_to_block[srt_m]
+                    elif tag == 'insert':
+                        block_idx = srt_pure_to_block[srt_start + i1 - 1] if (srt_start + i1) > 0 else (srt_pure_to_block[0] if srt_pure_to_block else 0)
+                        for m in range(j2 - j1):
+                            txt_pure_to_block[txt_start + j1 + m] = block_idx
+            
+            # Gắn cứng dữ liệu tại chính mốc neo
+            if k < len(anchors) - 2:
+                a_srt = anchors[k+1][0]
+                a_txt = anchors[k+1][1]
+                a_len = anchors[k+1][2]
+                for m in range(a_len):
+                    txt_pure_to_block[a_txt + m] = srt_pure_to_block[a_srt + m]
+        
         # Chống chảy ngược kịch bản
         for j in range(1, len(txt_pure_to_block)):
             if txt_pure_to_block[j] < txt_pure_to_block[j-1]:
@@ -122,7 +170,6 @@ def align_and_fix_subtitles(script_file, srt_file):
         # BỘ LỌC DẤU CÂU THÔNG MINH (CHỐNG RỚT DÒNG)
         # ====================================================
         
-        # Nếu dòng bắt đầu bằng dấu 。、 thì đẩy nó ngược lên dòng trên
         for i in range(1, len(final_texts)):
             while final_texts[i] and final_texts[i][0] in PUNC_END:
                 char_to_move = final_texts[i][0]
@@ -138,7 +185,6 @@ def align_and_fix_subtitles(script_file, srt_file):
                     final_texts[i] = char_to_move + final_texts[i]
                     break
 
-        # Nếu dòng kết thúc bằng dấu 「 thì đẩy nó xuống dòng dưới
         for i in range(len(final_texts) - 1):
             while final_texts[i] and final_texts[i][-1] in PUNC_START:
                 char_to_move = final_texts[i][-1]
@@ -154,18 +200,14 @@ def align_and_fix_subtitles(script_file, srt_file):
                     final_texts[i] += char_to_move
                     break
 
-        # 3. LẮP RÁP & BẢO TOÀN 100% CẤU TRÚC PREMIERE
+        # 3. LẮP RÁP & BẢO TOÀN CẤU TRÚC PREMIERE
         final_srt = []
         for i, b in enumerate(parsed_blocks):
             out_text = final_texts[i].strip()
-            
-            # KHÔNG XÓA DÒNG CỦA PREMIERE: Nếu Premiere trống (do nhạc nền), điền khoảng trắng tàng hình
             if not out_text:
                 out_text = "　"
-                
             final_srt.append(f"{i + 1}\n{b['time']}\n{out_text}")
 
-        # Chuẩn bị nội dung Text để Xem Trước
         srt_result_content = "\n\n".join(final_srt)
 
         # 4. Xuất File
@@ -176,7 +218,6 @@ def align_and_fix_subtitles(script_file, srt_file):
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(srt_result_content)
             
-        # Trả về cả đường dẫn File (để Tải) và Chuỗi ký tự (để Xem trước)
         return output_path, srt_result_content
         
     except Exception as e:
@@ -184,16 +225,14 @@ def align_and_fix_subtitles(script_file, srt_file):
 
 # --- GIAO DIỆN WEB ---
 with gr.Blocks() as web_app:
-    gr.Markdown("<h1 style='text-align: center;'>🎯 App Fix Subtitle - So Khớp Tuyệt Đối (V26)</h1>")
+    gr.Markdown("<h1 style='text-align: center;'>🎯 App Fix Subtitle - So Khớp Tuyệt Đối (V27)</h1>")
     
     with gr.Row():
-        # Cột bên trái: Khu vực Nhập liệu
         with gr.Column(scale=1):
             script_input = gr.File(label="1. Kéo thả KỊCH BẢN CHUẨN (.txt)")
             srt_input = gr.File(label="2. Kéo thả SUB LỖI do Premiere làm (.srt)")
-            submit_btn = gr.Button("🚀 Chạy Thuật Toán", variant="primary", size="lg")
+            submit_btn = gr.Button("🚀 Chạy Thuật Toán V27", variant="primary", size="lg")
             
-        # Cột bên phải: Khu vực Kết quả (Tải về + Xem trước)
         with gr.Column(scale=1):
             output_file = gr.File(label="📥 TẢI VỀ: File Sub Hoàn Chỉnh")
             preview_text = gr.Textbox(
@@ -203,7 +242,6 @@ with gr.Blocks() as web_app:
                 placeholder="Kết quả của file Sub sẽ hiển thị ở đây để bạn kiểm tra..."
             )
 
-    # Kết nối Nút bấm với 2 Đầu ra
     submit_btn.click(
         fn=align_and_fix_subtitles, 
         inputs=[script_input, srt_input], 
@@ -212,4 +250,4 @@ with gr.Blocks() as web_app:
 
 if __name__ == "__main__":
     gr.close_all()
-    web_app.launch(theme=gr.themes.Base())
+    web_app.launch()
