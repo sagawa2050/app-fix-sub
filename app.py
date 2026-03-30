@@ -4,19 +4,22 @@ import difflib
 import os
 import traceback
 
-def align_and_fix_subtitles(script_file, srt_file):
-    if not script_file or not srt_file: return None, "Vui lòng tải lên đầy đủ 2 file."
+def align_and_fix_subtitles(script_text, srt_file):
+    # Kiểm tra xem người dùng đã nhập đủ thông tin chưa
+    if not script_text or not script_text.strip(): 
+        return None, "Vui lòng dán nội dung kịch bản vào ô số 1."
+    if not srt_file: 
+        return None, "Vui lòng tải lên file SRT lỗi vào ô số 2."
+        
     try:
-        script_path = script_file if isinstance(script_file, str) else script_file.name
         srt_path = srt_file if isinstance(srt_file, str) else srt_file.name
 
-        # 1. Đọc và làm sạch Kịch Bản (TXT)
-        with open(script_path, 'r', encoding='utf-8', errors='ignore') as f:
-            script_raw = f.read()
+        # 1. Lấy dữ liệu Kịch Bản trực tiếp từ ô Textbox (không cần đọc file nữa)
+        script_raw = script_text
         
         script_clean = re.sub(r'\s+', '', script_raw)
         if len(script_clean) == 0:
-            raise ValueError("Kịch bản TXT trống.")
+            raise ValueError("Kịch bản trống hoặc chỉ chứa khoảng trắng.")
 
         PUNC_END = set("。、！？.,」』”’")
         PUNC_START = set("「『“‘")
@@ -73,14 +76,12 @@ def align_and_fix_subtitles(script_file, srt_file):
             if srt_idx != -1:
                 txt_idx = txt_ngrams.get(gram, -1)
                 if txt_idx != -1:
-                    # Lọc nhiễu: Mốc neo không được trôi quá 25% dòng thời gian
                     drift = abs(srt_idx / max(1, len(srt_pure)) - txt_idx / max(1, len(txt_pure)))
                     if drift < 0.25:
                         common_anchors.append((srt_idx, txt_idx, anchor_len))
                         
-        common_anchors.sort() # Sắp xếp mốc neo theo thời gian thực
+        common_anchors.sort() 
         
-        # Lọc mốc neo hợp lệ (chống vắt chéo)
         valid_anchors = []
         last_txt = -1
         last_srt = -1
@@ -94,7 +95,6 @@ def align_and_fix_subtitles(script_file, srt_file):
         txt_pure_to_block = [-1] * len(txt_pure)
         anchors = [(0, 0, 0)] + valid_anchors + [(len(srt_pure), len(txt_pure), 0)]
         
-        # Xử lý nội dung ở khoảng giữa các mốc neo
         for k in range(len(anchors) - 1):
             srt_start = anchors[k][0] + anchors[k][2]
             srt_end = anchors[k+1][0]
@@ -121,7 +121,6 @@ def align_and_fix_subtitles(script_file, srt_file):
                         for m in range(j2 - j1):
                             txt_pure_to_block[txt_start + j1 + m] = block_idx
             
-            # Gắn cứng dữ liệu tại chính mốc neo
             if k < len(anchors) - 2:
                 a_srt = anchors[k+1][0]
                 a_txt = anchors[k+1][1]
@@ -129,12 +128,10 @@ def align_and_fix_subtitles(script_file, srt_file):
                 for m in range(a_len):
                     txt_pure_to_block[a_txt + m] = srt_pure_to_block[a_srt + m]
         
-        # Chống chảy ngược kịch bản
         for j in range(1, len(txt_pure_to_block)):
             if txt_pure_to_block[j] < txt_pure_to_block[j-1]:
                 txt_pure_to_block[j] = txt_pure_to_block[j-1]
 
-        # Ánh xạ ngược lại vào Script chứa dấu câu
         script_to_block = [-1] * len(script_clean)
         pure_idx = 0
         
@@ -144,7 +141,6 @@ def align_and_fix_subtitles(script_file, srt_file):
                     script_to_block[i] = txt_pure_to_block[pure_idx]
                 pure_idx += 1
 
-        # Đẩy dấu câu vào cùng Block với chữ
         for i, char in enumerate(script_clean):
             if char in PUNC_END:
                 b_idx = 0
@@ -167,9 +163,8 @@ def align_and_fix_subtitles(script_file, srt_file):
                 final_texts[block_idx] += script_clean[i]
 
         # ====================================================
-        # BỘ LỌC DẤU CÂU THÔNG MINH (CHỐNG RỚT DÒNG)
+        # BỘ LỌC DẤU CÂU THÔNG MINH
         # ====================================================
-        
         for i in range(1, len(final_texts)):
             while final_texts[i] and final_texts[i][0] in PUNC_END:
                 char_to_move = final_texts[i][0]
@@ -210,7 +205,7 @@ def align_and_fix_subtitles(script_file, srt_file):
 
         srt_result_content = "\n\n".join(final_srt)
 
-        # 4. Xuất File
+        # 4. Xuất File (Tạo file để Tải Về)
         original_filename = os.path.basename(srt_path)
         name_only, ext = os.path.splitext(original_filename)
         output_path = f"{name_only}_FIXED{ext}"
@@ -228,16 +223,24 @@ with gr.Blocks() as web_app:
     gr.Markdown("<h1 style='text-align: center;'>🎯 App Fix Subtitle - So Khớp Tuyệt Đối (V27)</h1>")
     
     with gr.Row():
+        # Cột trái: Nhập liệu
         with gr.Column(scale=1):
-            script_input = gr.File(label="1. Kéo thả KỊCH BẢN CHUẨN (.txt)")
+            # Thay vì gr.File, giờ dùng gr.Textbox để dán Kịch Bản
+            script_input = gr.Textbox(
+                label="1. DÁN NỘI DUNG KỊCH BẢN CHUẨN VÀO ĐÂY", 
+                lines=12, 
+                placeholder="Ví dụ: Xin chào các bạn, hôm nay chúng ta sẽ cùng tìm hiểu..."
+            )
             srt_input = gr.File(label="2. Kéo thả SUB LỖI do Premiere làm (.srt)")
             submit_btn = gr.Button("🚀 Chạy Thuật Toán V27", variant="primary", size="lg")
             
+        # Cột phải: Xuất kết quả
         with gr.Column(scale=1):
-            output_file = gr.File(label="📥 TẢI VỀ: File Sub Hoàn Chỉnh")
+            # Khung tải file về (Gradio mặc định có nút Download ở đây)
+            output_file = gr.File(label="📥 TẢI VỀ: File Sub Hoàn Chỉnh (.srt)")
             preview_text = gr.Textbox(
                 label="👀 XEM TRƯỚC: Nội dung SRT", 
-                lines=18, 
+                lines=15, 
                 interactive=False, 
                 placeholder="Kết quả của file Sub sẽ hiển thị ở đây để bạn kiểm tra..."
             )
@@ -250,4 +253,5 @@ with gr.Blocks() as web_app:
 
 if __name__ == "__main__":
     gr.close_all()
+    # Code chuẩn đẩy lên Hugging Face/GitHub (bỏ share=True)
     web_app.launch()
